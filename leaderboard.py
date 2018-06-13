@@ -119,6 +119,10 @@ class LeaderDataHandler(handler.BaseHandler):
 def genLeaderboard(leaderDate = None):
     """Recalculates the leaderboard for the given datetime object.
     If leaderDate is None, then recalculates all leaderboards."""
+
+    # Get unused points playerID before opening cursor to change leaderboard
+    # records to avoid db deadlock if no unused player is yet defined
+    unusedPointsPlayerID = scores.getUnusedPointsPlayerID()
     with db.getCur() as cur:
         leadercols = ['Place'] + columns
         leaderrows = []
@@ -141,7 +145,7 @@ def genLeaderboard(leaderDate = None):
             for query in queries:
                 sql = query.format(datetest=datetest, datefmt=datefmt).format(
                     date="Scores.Date")
-                cur.execute(sql, [scores.getUnusedPointsPlayerID()] + bindings)
+                cur.execute(sql, [unusedPointsPlayerID] + bindings)
                 rows += [dict(zip(columns, row)) for row in cur.fetchall()]
 
             rows.sort(key=lambda row: row['AvgScore'], reverse=True) # sort by score

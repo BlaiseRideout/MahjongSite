@@ -175,9 +175,18 @@ class QuartersHandler(handler.BaseHandler):
                 (scores.unusedPointsIncrement(),))
             rows = cur.fetchall()
 
-            self.render("quarters.html",
-                        message = "No quarters found" if len(rows) == 0 else "",
-                        quarters=rows)
+            if len(rows) == 0:
+                cur.execute(
+                    "SELECT Quarter, Gamecount, "
+                    "       COALESCE(UnusedPointsIncrement, ?)"
+                    " FROM Quarters"
+                    " ORDER BY Quarter DESC",
+                    (scores.unusedPointsIncrement(),))
+                rows = cur.fetchall()
+                if len(rows) == 0:
+                    rows = [(scores.quarterString(), None, None)]
+                
+            self.render("quarters.html", quarters=rows)
 
 class DeleteQuarterHandler(handler.BaseHandler):
     @handler.is_admin
@@ -200,7 +209,7 @@ class DeleteQuarterHandler(handler.BaseHandler):
                         title = "Quarter Deleted",
                         next = "Manage quarters",
                         next_url = "/admin/quarters")
-            leaderboard.genLeaderboard(scores.quarterDate(quarter))
+            leaderboard.genLeaderboard(scores.quarterDate(q))
         else:
             self.render("quarters.html",
                         message = ("Error: Multiple quarters named {0} "
