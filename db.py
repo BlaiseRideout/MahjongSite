@@ -8,15 +8,19 @@ import re
 import collections
 import shutil
 import os
+import argparse
 
 import util
 import settings
+from sqlite_schema import *
 
 class getCur():
     con = None
     cur = None
+    def __init__(self, dbfile=settings.DBFILE):
+        self.__dbfile = dbfile
     def __enter__(self):
-        self.con = sqlite3.connect(settings.DBFILE)
+        self.con = sqlite3.connect(self.__dbfile)
         self.cur = self.con.cursor()
         self.cur.execute("PRAGMA foreign_keys = 1;")
         return self.cur
@@ -94,7 +98,9 @@ schema = collections.OrderedDict({
         'Id INTEGER PRIMARY KEY',
         'Name TEXT',
         'Duration INTEGER',
-        'Time DATETIME'
+        'Time DATETIME',
+        'unique(name, duration, time)on conflict fail',
+        'ChEcK (duration > 0)',
     ],
     'Leaderboards': [
         'Period TEXT',
@@ -104,12 +110,20 @@ schema = collections.OrderedDict({
         'AvgScore REAL',
         'GameCount INTEGER',
         'DropGames INTEGER',
+        'PRIMARY KEY(Period, Date)',
         'FOREIGN KEY(PlayerId) REFERENCES Players(Id) ON DELETE CASCADE'
-    ]
+    ],
+    'Memberships': [
+        'PlayerId INTEGER REFERENCES Players(Id) ON DELETE CASCADE',
+        'QuarterId TEXT REFERENCES Quarters(Quarter)',
+        'UNIQUE(PlayerId, QuarterId)'
+        ],
 })
 
-def init(force=False):
-    warnings.filterwarnings('ignore', r'Table \'[^\']*\' already exists')
+def init(force=False, upgrade=True, ordermatters=False, dbfile=settings.DBFILE,
+         verbose=0):
+    if verbose < 2:
+        warnings.filterwarnings('ignore', r"Table '[^']*' already exists")
 
     global schema
     independent_tables = []
@@ -130,154 +144,197 @@ def init(force=False):
         if set(parent_tables(table)) - checked:
             to_check.append(table)
         else:
-            check_table_schema(table, force=force)
+            check_table_schema(
+                table, schema[table], ordermatters=ordermatters, 
+                upgrade=upgrade, force=force, dbfile=dbfile, verbose=verbose)
             checked.add(table)
         count += 1
 
-def make_backup():
-    backupdb = datetime.datetime.now().strftime(settings.DBDATEFORMAT) + "-" + os.path.split(settings.DBFILE)[1]
-    backupdb = os.path.join(settings.DBBACKUPS, backupdb)
-    print("Making backup of database {0} to {1}".format(settings.DBFILE, backupdb))
-    if not os.path.isdir(settings.DBBACKUPS):
-        os.mkdir(settings.DBBACKUPS)
-    shutil.copyfile(settings.DBFILE, backupdb)
+def make_backup(dbfile=settings.DBFILE,
+                dateformat=settings.DBDATEFORMAT,
+                backupdir=settings.DBBACKUPS):
+    backupdb = datetime.datetime.now().strftime(dateformat) + "-" + os.path.split(dbfile)[1]
+    backupdb = os.path.join(backupdir, backupdb)
+    print("Making backup of database {} to {}".format(dbfile, backupdb))
+    if not os.path.isdir(backupdir):
+        os.mkdir(backupdir)
+    shutil.copyfile(dbfile, backupdb)
 
-fkey_pattern = re.compile(
-    r'.*FOREIGN\s+KEY\s*\((\w+)\)\s*REFERENCES\s+(\w+)\s*\((\w+)\).*',
-    re.IGNORECASE)
+def check_table_schema(tablename, table_spec,
+                       ordermatters=False, force=False, backupname="_backup", 
+                       upgrade=True, dbfile=settings.DBFILE, verbose=0):
+    """Compare an existing table schema in a given database with that in
+    the table_spec and make corrections if upgrade requested.  It will
+    prompt to make make changes unless force is requested.
 
-def parent_tables(table_spec):
-    global fkey_pattern
-    parents = []
-    for spec in table_spec:
-        match = fkey_pattern.match(spec)
-        if match:
-            parents.append(match.group(2))
-    return parents
+    The algorithm checks for new tables, new fields, new (foreign key)
+    constraints, and altered field specificaitons.  If ordermatters is
+    true, changes to the order of fields are checked. For schema
+    changes beyond just adding fields, it renames the old table to a
+    "backup" table, and then copies its content into a freshly built
+    new version of the table.  For other "complex" schema changes, it
+    moves the old database aside and either build from scratch or
+    manually alter it.
 
-def check_table_schema(tablename, force=False, backupname="_backup"):
-    """Compare existing table schema with that specified in schema above
-    and make corrections as needed.  This checks for new tables, new
-    fields, new (foreign key) constraints, and altered field specificaitons.
-    For schema changes beyond just adding fields, it renames the old table
-    to a "backup" table, and then copies its content into a freshly built
-    new version of the table.
-    For really complex schema changs, move the old database aside and
-    either build from scratch or manually alter it.
     """
-    table_fields = schema[tablename]
-    with getCur() as cur:
-        cur.execute("PRAGMA table_info('{0}')".format(tablename))
-        actual_fields = cur.fetchall()
-        cur.execute("PRAGMA foreign_key_list('{0}')".format(tablename))
-        actual_fkeys = cur.fetchall()
-        if len(actual_fields) == 0:
-            cur.execute("CREATE TABLE IF NOT EXISTS {0} ({1});".format(
-                tablename, ", ".join(table_fields)))
+    # Table spec starts with column specifications
+    table_fields = column_specs(table_spec)
+    table_pragmas = []
+    for f in table_fields:
+        table_pragmas.extend(column_def_or_constraint_to_pragma_records(
+            f, tablename=tablename, context=table_pragmas))
+    columns = 0
+    for c_i, p in enumerate(table_pragmas):
+        if isinstance(p, sqlite_column_record):
+            if ordermatters:
+                table_pragmas[c_i] = p._replace(cid=columns)
+            columns += 1
+
+    # After the column specifications come table constraints
+    for f in table_spec[len(table_fields):]:
+        table_pragmas.extend(column_def_or_constraint_to_pragma_records(
+            f, tablename=tablename, context=table_pragmas))
+
+    # Now get the actual database pragma records describing its schema
+    actual_pragmas = pragma_records_for_table(tablename, dbfile)
+    for p_i, p in enumerate(actual_pragmas): # Force lowercase names
+        if 'name' in p._fields:
+            actual_pragmas[p_i] = p._replace(name=p.name.lower())
+    with getCur(dbfile=dbfile) as cur:
+        if len(actual_pragmas) == 0:
+            if verbose > 0:
+                print("Schema in {} does not have table {}".format(
+                    dbfile, tablename))
+            if upgrade:
+                if verbose > 0:
+                    print("Creating empty {} table in {}".format(
+                        tablename, dbfile))
+                cur.execute("CREATE TABLE IF NOT EXISTS {} ({});".format(
+                    tablename, ", ".join(table_spec)))
         else:
-            fields_to_add = missing_fields(table_fields, actual_fields)
-            fkeys_to_add = missing_constraints(table_fields, actual_fkeys)
-            altered = altered_fields(table_fields, actual_fields)
-            deleted = deleted_fields(table_fields, actual_fields)
-            if (len(fields_to_add) > 0 and len(fkeys_to_add) == 0 and
-                len(altered) == 0):
+            fields_to_add = missing_fields(table_pragmas, actual_pragmas)
+            deleted = deleted_fields(table_pragmas, actual_pragmas)
+            altered = altered_fields(table_pragmas, actual_pragmas,
+                                     ordermatters)
+            constraints_to_add = missing_constraints(table_pragmas,
+                                                     actual_pragmas)
+            constraints_deleted = deleted_constraints(table_pragmas,
+                                                      actual_pragmas)
+            changed = len(fields_to_add + deleted + altered + 
+                          constraints_to_add + constraints_deleted) > 0
+            if verbose > 0:
+                print('Schema for table {} in {} is {}different'.format(
+                    tablename, dbfile, '' if changed else 'not '))
+            if changed and verbose > 1:
+                if fields_to_add:
+                    print('  Adding fields:', [p.name for p in fields_to_add])
+                    for p in fields_to_add:
+                        print('   ', p)
+                if deleted:
+                    print('  Deleting fields:', [p.name for p in deleted])
+                if altered:
+                    for pragma, changes in altered:
+                        print('  Field {} changes:'.format(pragma.name))
+                        for c in changes:
+                            print('   ', c)
+                        print('    New definiton: {}'.format(pragma))
+                if constraints_to_add:
+                    print('  Adding constraints:')
+                    for p in constraints_to_add:
+                        print('   ', p)
+                if constraints_deleted:
+                    print('  Deleting constraints:')
+                    for p in constraints_deleted:
+                        print('   ', p)
+            if (upgrade and 
+                len(fields_to_add) > 0 and 
+                len(deleted + altered + 
+                    constraints_to_add + constraints_deleted) == 0):
                 # Only new fields to add
                 if force or util.prompt(
-                        "SCHEMA CHANGE: Add {0} to table {1}".format(
+                        "SCHEMA CHANGE: Add {} to table {}".format(
                             ", ".join(fields_to_add), tablename)):
+                    if verbose > 1:
+                        print("Adding fields to {}:\n{}".format(
+                            tablename, fields_to_add))
                     for field_spec in fields_to_add:
-                        cur.execute("ALTER TABLE {0} ADD COLUMN {1};".format(
-                            tablename, field_spec))
-            elif len(fkeys_to_add) > 0 or len(altered) > 0:
+                        sql = "ALTER TABLE {} ADD COLUMN {};".format(
+                            tablename, field_spec)
+                        if verbose > 2:
+                            print('Executing SQL:\n', sql)
+                        cur.execute(sql)
+            elif upgrade and changed:
                 # Fields have changed significantly; try copying old into new
-                if force or util.prompt(
-                        ("SCHEMA CHANGE: Backup and recreate table {0} "
-                         "to add {1}, impose {2}, correct {3}, and delete {4}))").format(
-                             tablename, fields_to_add, fkeys_to_add,
-                             altered, deleted)):
+                prompt = "SCHEMA CHANGE: Backup and recreate table {} to ".format(
+                    tablename)
+                prompt += "add fields {}, ".format(
+                    fields_to_add) if fields_to_add else ""
+                prompt += "remove fields {}, ".format(
+                    deleted) if deleted else ""
+                prompt += "alter fields {}, ".format(
+                    [a[0] for a in altered]) if altered else ""
+                prompt += "impose constraints {}, ".format(
+                    constraints_to_add) if constraints_to_add else ""
+                prompt += "remove constraints {}, ".format(
+                    constraints_deleted) if constraints_deleted else ""
+                if force or util.prompt(prompt[:-2]):
                     make_backup()
                     backup = tablename + backupname
-                    sql = "ALTER TABLE {0} RENAME TO {1};".format(
+                    sql = "ALTER TABLE {} RENAME TO {};".format(
                         tablename, backup)
                     cur.execute(sql)
-                    sql = "CREATE TABLE {0} ({1});".format(
-                        tablename, ", ".join(table_fields))
+                    sql = "CREATE TABLE {} ({});".format(
+                        tablename, ", ".join(table_spec))
+                    if verbose > 2:
+                        print('Executing SQL:\n', sql)
                     cur.execute(sql)
                     # Copy all actual fields that have a corresponding field
                     # in the new schema
-                    common_fields = [
-                        f[1] for f in actual_fields if
-                        find_field_spec_for_pragma(table_fields, f)]
+                    common_fieldnames = [
+                        p.name for p in 
+                        common_fields(table_pragmas, actual_pragmas)]
                     sql = "INSERT INTO {0} ({1}) SELECT {1} FROM {2};".format(
-                        tablename, ", ".join(common_fields), backup)
+                        tablename, ", ".join(common_fieldnames), backup)
+                    if verbose > 2:
+                        print('Executing SQL:\n', sql)
                     cur.execute(sql)
-                    sql = "DROP TABLE {0};".format(backup)
+                    sql = "DROP TABLE {};".format(backup)
+                    if verbose > 2:
+                        print('Executing SQL:\n', sql)
                     cur.execute(sql)
 
-def words(spec):
-    return re.findall(r'\w+', spec)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description="""Mahjong database check and upgrade program.
+        This checks that the tables in a database match the schema
+        description in this program.  It can alter the schema to
+        make it match.
+        """,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument(
+        'database', default=settings.DBFILE, nargs='?',
+        help='SQLite3 database file to check.  This overrides any values '
+        'in defaults.py or mysettings.py.')
+    parser.add_argument(
+        '-u', '--upgrade', default=False, action='store_true',
+        help='Try upgrading the database if differences detected')
+    parser.add_argument(
+        '-o', '--order-matters', default=False, action='store_true',
+        help='When comparing database schema, the order of fields in the table '
+        'matters if this option is selected.  Otherwise it is ignored.')
+    parser.add_argument(
+        '-f', '--force', default=False, action='store_true',
+        help='Force changes without prompting first')
+    parser.add_argument(
+        '-v', '--verbose', action='count', default=0,
+        help='Add verbose comments')
 
-def missing_fields(table_fields, actual_fields):
-    return [ field_spec for field_spec in table_fields if (
-        words(field_spec)[0].upper() not in [
-            'FOREIGN', 'CONSTRAINT', 'PRIMARY', 'UNIQUE', 'NOT',
-            'CHECK', 'DEFAULT', 'COLLATE'] + [
-                x[1].upper() for x in actual_fields]) ]
+    args = parser.parse_args()
 
-def missing_constraints(table_fields, actual_fkeys):
-    return [ field_spec for field_spec in table_fields if (
-        words(field_spec)[0].upper() in ['FOREIGN', 'CONSTRAINT'] and
-        'REFERENCES' in [ w.upper() for w in words(field_spec) ] and
-        not any(map(lambda fkey: match_constraint(field_spec, fkey),
-                    actual_fkeys))) ]
-
-def match_constraint(field_spec, fkey_record):
-    global fkey_pattern
-    match = fkey_pattern.match(field_spec)
-    return (match and
-            match.group(1).upper() == fkey_record[3].upper() and
-            match.group(2).upper() == fkey_record[2].upper() and
-            match.group(3).upper() == fkey_record[4].upper())
-
-sqlite_pragma_columns = [
-    'column_ID', 'name', 'type', 'notnull', 'default', 'pk_member'
-]
-
-def altered_fields(table_fields, actual_fields):
-    altered = []
-    for actual in actual_fields:
-        matching_spec = find_field_spec_for_pragma(table_fields, actual)
-        if matching_spec and not field_spec_matches_pragma(matching_spec, actual):
-            altered.append(matching_spec)
-    return altered
-
-def deleted_fields(table_fields, actual_fields):
-    deleted = []
-    for actual in actual_fields:
-        matching_spec = find_field_spec_for_pragma(table_fields, actual)
-        if not matching_spec:
-            deleted.append(actual[1] + ' ' + actual[2])
-    return deleted
-
-def find_field_spec_for_pragma(table_fields, pragma_rec):
-    for field in table_fields:
-        if words(field)[0].upper() == pragma_rec[1].upper():
-            return field
-    return None
-
-def field_spec_matches_pragma(field_spec, pragma_rec):
-    global sqlite_pragma_columns
-    if field_spec is None or pragma_rec is None:
-        return False
-    field = dict(zip(
-        sqlite_pragma_columns,
-        [x.upper() if isinstance(x, str) else x for x in pragma_rec]))
-    spec = words(field_spec.upper())
-    return (spec[0] == field['name'] and
-            all([w in spec for w in words(field['type'])]) and
-            (field['notnull'] == 0 or ('NOT' in spec and 'NULL' in spec)) and
-            (field['default'] is None or
-             ('DEFAULT' in spec and str(field['default']) in spec)) and
-            (field['pk_member'] == (
-                1 if 'PRIMARY' in spec and 'KEY' in spec else 0))
-    )
+    if args.verbose > 2:
+        print('Checking constraints in schema...')
+        for table, desc in schema.items():
+            check_constraint_pattern_match(table, desc)
+    init(force=args.force, dbfile=args.database,
+         upgrade=args.upgrade, ordermatters=args.order_matters,
+         verbose=args.verbose)
