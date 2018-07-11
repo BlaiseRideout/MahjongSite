@@ -149,6 +149,14 @@ def init(force=False, upgrade=True, ordermatters=False, dbfile=settings.DBFILE,
             for table in delta['different']:
                 print(' ', table)
 
+def make_backup():
+    backupdb = datetime.datetime.now().strftime(settings.DBDATEFORMAT) + "-" + os.path.split(settings.DBFILE)[1]
+    backupdb = os.path.join(settings.DBBACKUPS, backupdb)
+    print("Making backup of database {0} to {1}".format(settings.DBFILE, backupdb))
+    if not os.path.isdir(settings.DBBACKUPS):
+        os.mkdir(settings.DBBACKUPS)
+    shutil.copyfile(settings.DBFILE, backupdb)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description="""Mahjong database check and upgrade program.
