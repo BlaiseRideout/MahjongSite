@@ -157,6 +157,14 @@ def make_backup():
         os.mkdir(settings.DBBACKUPS)
     shutil.copyfile(settings.DBFILE, backupdb)
 
+def words(spec):
+    return re.findall(r'\w+', spec)
+
+def table_field_names(tablename):
+    return [words(fs)[0] for fs in schema.get(tablename, []) 
+            if not words(fs)[0].upper() in [
+                    'FOREIGN', 'UNIQUE', 'CONSTRAINT', 'PRIMARY', 'CHECK']]
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description="""Mahjong database check and upgrade program.
