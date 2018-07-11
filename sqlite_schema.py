@@ -448,21 +448,25 @@ def standardize_create_table_sql(sql):
             'CREATE TABLE',
             sql_delims.sub(r'\1', multi_whitespace.sub(' ', sql))))
 
-def walk_tables(db_schema, func, verbose=0):
+def walk_tables(db_schema, func, verbose=0, ignore=[]):
     """Walk the tables in a datbase schema in their foreign key dependence
     order.  The tables with no foreign key dependencies will come first.
     Tables that only only depend on other tables that have no foreign keys
     come next.  Continue until all tables are visited choosing only tables
-    whose foreign key tables have already been visited.  The function should
-    take 2 arguments, a table name and pragma record dictionary produced by
-    parse_database_schema.  """
-    visited = []
-    to_visit = collections.deque(db_schema.keys())
+    whose foreign key tables have already been visited and that are not in
+    the ignore list.  Tables in the ingnore list are assumed to exist for
+    the purpose of making foreign keys.
+    The function should take 2 arguments, a table name and pragma record 
+    dictionary produced by parse_database_schema.
+    """
+    visited = [tbl.lower() for tbl in ignore]
+    to_visit = collections.deque(
+        [tbl for tbl in db_schema.keys() if tbl.lower() not in visited])
     skipped = 0
     count = 0
     if verbose > 2:
-        print('Walking {} table{}...'.format(
-            len(to_visit), '' if len(to_visit) == 1 else 's'))
+        print('Walking {} table{} calling {}...'.format(
+            len(to_visit), '' if len(to_visit) == 1 else 's', func))
     while skipped < len(to_visit):
         table = to_visit.popleft()
         pragma_dict = db_schema[table]
@@ -896,9 +900,10 @@ def backup_db_and_migrate(
                             cur.rowcount, '' if cur.rowcount == 1 else 's',
                             table))
                 done.append(table)
-            walk_tables(new_db_schema, copy_table)
+            walk_tables(new_db_schema, copy_table, verbose=verbose)
             if preserve_unspecified:
-                walk_tables(old_db_schema, copy_table)
+                walk_tables(old_db_schema, copy_table, verbose=verbose,
+                            ignore=done)
         if verbose > 1:
             print('Database successfully migrated to {}'.format(newdbfile.name))
         dbfile_stat = os.stat(dbfile)
@@ -939,7 +944,7 @@ def upgrade_database(new_db_schema, old_db_schema, dbfile, verbose=0):
                     if verbose > 1:
                         print('Creating new {} table'.format(table))
                     cur.execute(pd['sql'])
-            walk_tables(new_db_schema, alter_table)
+            walk_tables(new_db_schema, alter_table, verbose=verbose)
         return True
     except sqlite3.DatabaseError as e:
         print('Error while trying to add column or create table in {}:'.format(
@@ -956,7 +961,7 @@ def create_database(db_schema, dbfile, verbose=0):
                 if verbose > 1:
                     print('Creating new {} table'.format(table))
                 cur.execute(pd['sql'])
-            walk_tables(db_schema, create_table)
+            walk_tables(db_schema, create_table, verbose=verbose)
         if verbose > 0:
             print('Created empty database in {}'.format(dbfile))
         return True
