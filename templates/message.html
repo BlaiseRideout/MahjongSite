@@ -3,7 +3,10 @@
 {% block title %}{% try %}{% if title %} - {{ title }}{% end %}{% except %}{% end %}{% end %}
 
 {% block head %}
-{% raw head_html %}
+  {% try %}
+    {% raw head_html %}
+  {% except %}
+  {% end %}
 {% end %}
 
 {% block content %}
