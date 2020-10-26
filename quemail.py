@@ -37,12 +37,20 @@ class QueMail(Thread):
 
     def init(self, smtp_host, smtp_login, smtp_pswd, smtp_port = 25, use_tls = False, queue_size = 100):
         self._queue = Queue(queue_size)
-        log.info("Initializing QueMail with queue size %i. Using SMTP server: %s:%i." % (queue_size, smtp_host, smtp_port))
+        log.info("Initializing QueMail (queue size = %i). "
+                 "Using SMTP server: %s:%i %s TLS." % (
+                     queue_size, smtp_host, smtp_port,
+                     'with' if use_tls else 'without'))
         self.smtp_host = smtp_host
         self.smtp_login = smtp_login
         self.smtp_password = smtp_pswd
         self.smtp_port = smtp_port
         self.use_tls = use_tls
+        try:
+            smtp = self.establish_SMTP_connection()
+        except Exception as e:
+            log.error('Error establishing connection to SMTP server: {}'.format(
+                e))
 
     def __init__(self):
         Thread.__init__(self)
@@ -54,7 +62,7 @@ class QueMail(Thread):
         self.smtp_password = None
         self.smtp_port = None
         self.use_tls = False
-        self.check_interval = 5          # the number of seconds to check the queue
+        self.check_interval = 5    # the number of seconds between queue checks
 
     def end(self):
         '''
@@ -68,16 +76,10 @@ class QueMail(Thread):
     def run(self):
         while not self._do_quit:
             if not self._queue.empty():
-                log.debug(u"Connecting to SMTP server: %s:%i" % (self.smtp_host, self.smtp_port))
                 smtp = None
                 try:
-                    smtp = smtplib.SMTP()
-                    smtp.connect(self.smtp_host, self.smtp_port)
-                    if self.use_tls:
-                      smtp.starttls()
-                      smtp.ehlo()
-                    smtp.login(self.smtp_login, self.smtp_password)
-
+                    smtp = self.establish_SMTP_connection()
+                    
                     while not self._queue.empty():
                         t = time.time()
                         eml = self._queue.get()
@@ -101,6 +103,17 @@ class QueMail(Thread):
                         smtp.quit()
             sleep(self.check_interval)
 
+    def establish_SMTP_connection(self):
+        log.debug(u"Connecting to SMTP server: %s:%i%s using TLS" % (
+            self.smtp_host, self.smtp_port, '' if self.use_tls else ' not'))
+        smtp = smtplib.SMTP()
+        smtp.connect(self.smtp_host, self.smtp_port)
+        if self.use_tls:
+            smtp.starttls()
+            smtp.ehlo()
+        smtp.login(self.smtp_login, self.smtp_password)
+        return smtp
+        
     def send(self, eml):
         if self._queue is None:
             return

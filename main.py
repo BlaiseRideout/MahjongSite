@@ -310,7 +310,8 @@ def main():
     if hasattr(settings, 'EMAILSERVER'):
         qm = QueMail.get_instance()
         qm.init(settings.EMAILSERVER, settings.EMAILUSER,
-                settings.EMAILPASSWORD, settings.EMAILPORT, True)
+                settings.EMAILPASSWORD, settings.EMAILPORT, 
+                settings.EMAILUSETLS)
         qm.start()
 
     http_server = tornado.httpserver.HTTPServer(Application(force=force),

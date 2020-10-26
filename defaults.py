@@ -87,6 +87,7 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 6.1; Win64; x64)"
 #   and password reset links to users.
 EMAILSERVER = "smtp.server.com"
 EMAILPORT = 587
+EMAILUSETLS = True
 EMAILUSER = "email@address.com"
 EMAILFROM = "{0} <{1}>".format(CLUBNAME, EMAILUSER)
 EMAILPASSWORD = ""
