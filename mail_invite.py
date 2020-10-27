@@ -16,10 +16,11 @@ import login
 import logging
 from quemail import QueMail
 
-HOST = 'seattlemahjong.club'
 log = logging.getLogger("QueMail")
 log.setLevel(logging.INFO)
-print('mail_invite log =', log, 'id =', id(log))
+
+if not getattr(settings, 'WEBHOST', None):
+    settings.WEBHOST = 'seattlemahjong.club'
 
 def email(email_address):
     with db.getCur() as cur:
@@ -31,7 +32,8 @@ def email(email_address):
 
         util.sendEmail(email_address,
                        "Your {0} Account".format(settings.CLUBNAME),
-                       login.format_invite(settings.CLUBNAME, HOST, code))
+                       login.format_invite(
+                           settings.CLUBNAME, settings.WEBHOST, code))
 
 qm = None
 
