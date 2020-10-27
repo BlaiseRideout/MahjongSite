@@ -9,8 +9,7 @@ except ImportError:
     mysettings = None
 
 settings = sys.modules[__name__]
-defaultSettings = [i for i in dir(defaults) if i[0] != "_"]
-for setting in defaultSettings:
+for setting in [i for i in dir(defaults) + dir(mysettings) if i[0] != "_"]:
     if mysettings is None or not hasattr(mysettings, setting):
         setattr(settings, setting, getattr(defaults, setting))
     else:
