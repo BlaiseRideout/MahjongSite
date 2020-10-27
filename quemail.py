@@ -35,7 +35,8 @@ log = logging.getLogger("QueMail")
 class QueMail(Thread):
     instance = None
 
-    def init(self, smtp_host, smtp_login, smtp_pswd, smtp_port = 25, use_tls = False, queue_size = 100):
+    def init(self, smtp_host, smtp_login, smtp_pswd,
+             smtp_port = 25, use_tls = False, queue_size = 100, interval=5):
         self._queue = Queue(queue_size)
         log.info("Initializing QueMail (queue size = %i). "
                  "Using SMTP server: %s:%i %s TLS." % (
@@ -46,13 +47,14 @@ class QueMail(Thread):
         self.smtp_password = smtp_pswd
         self.smtp_port = smtp_port
         self.use_tls = use_tls
+        self.check_interval = interval
         try:
             smtp = self.establish_SMTP_connection()
         except Exception as e:
             log.error('Error establishing connection to SMTP server: {}'.format(
                 e))
 
-    def __init__(self):
+    def __init__(self, interval=5):
         Thread.__init__(self)
         self.daemon = True
         self._do_quit = False
@@ -62,7 +64,7 @@ class QueMail(Thread):
         self.smtp_password = None
         self.smtp_port = None
         self.use_tls = False
-        self.check_interval = 5    # the number of seconds between queue checks
+        self.check_interval = interval # number of seconds between queue checks
 
     def end(self):
         '''
