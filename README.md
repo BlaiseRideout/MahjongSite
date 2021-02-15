@@ -149,7 +149,7 @@ web.log` to track server activity and debug issues.
 
 Updates
 ==========
-When you update code, you do it fork of the repository and send
+When you update code, you do it in a fork of the repository and send
 a "pull request" to the owners to merge your changes into the
 main repo.  If you already know about repo's and forks and pull
 requests, that will make sense.  If it's new to you.  You'll
