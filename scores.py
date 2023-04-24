@@ -44,7 +44,7 @@ def dateString(date):
     else:
         raise Exception('Unexpected input type passed to dateString, {}'.format(
             date))
-    
+
 def getPointSettings(quarter=None, date=None):
     """Get the UnusedPointsIncrement and starting ScorePerPlayer value for
     the given quarter.
@@ -59,7 +59,7 @@ def getPointSettings(quarter=None, date=None):
                         "  WHERE Quarter <= ? ORDER BY Quarter DESC"
                         " LIMIT 1",
                         (settings.UNUSEDPOINTSINCREMENT,
-                         settings.SCOREPERPLAYER, 
+                         settings.SCOREPERPLAYER,
                          quarter))
             increment, perPlayer = cur.fetchone()
     except:
@@ -186,7 +186,7 @@ def rankGame(scores, perPlayer, unusedPointsIncr):
         else:
             score['Score'] = 0
 
-    return {"status": 0, "realPlayerCount": realPlayerCount, 
+    return {"status": 0, "realPlayerCount": realPlayerCount,
             "hasUnusedPoints": hasUnusedPoints}
 
 def addGame(scores, gamedate = None, gameid = None):
@@ -218,7 +218,7 @@ def addGame(scores, gamedate = None, gameid = None):
 
     quarter = quarterString(datetime.datetime.strptime(gamedate, dateFormat))
     unusedPointsIncr, perPlayer = getPointSettings(quarter=quarter)
-            
+
     status = rankGame(scores, perPlayer, unusedPointsIncr)
     if status['status'] == 0:
         hasUnusedPoints = status['hasUnusedPoints']
@@ -231,14 +231,19 @@ def addGame(scores, gamedate = None, gameid = None):
     with db.getCur() as cur:
         if gameid is None:
             cur.execute("SELECT COALESCE(GameId, 0) FROM Scores ORDER BY GameId DESC LIMIT 1")
-            gameid = cur.fetchone()[0] + 1
+            game_row = cur.fetchone()
+            if game_row is not None:
+                gameid = game_row[0] + 1
+            else:
+                gameid = 0
             olddate = gamedate
         else:
             cur.execute("SELECT MAX(Date) FROM Scores WHERE GameId = ?"
                         "  GROUP BY GameId", (gameid,))
             result = cur.fetchone()
-            olddate = result[0]
-            cur.execute("DELETE FROM Scores WHERE GameId = ?", (gameid,))
+            if result is not None:
+                olddate = result[0]
+                cur.execute("DELETE FROM Scores WHERE GameId = ?", (gameid,))
 
         columns = ["GameId", "PlayerId", "Rank", "PlayerCount",
             "RawScore", "Chombos", "Score", "Date", "Quarter", "DeltaRating"]

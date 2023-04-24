@@ -1,4 +1,4 @@
 tornado
 passlib
-pygit2==0.24.2
+pygit2
 jsbeautifier
