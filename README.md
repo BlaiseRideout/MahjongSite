@@ -25,7 +25,7 @@ graphical user interface (GUI) based. In our examples below, we show
 only the command line methods.
 
 1. Clone this repository on your test system with a command like `git
-clone https://github.com/BlaiseRitchie/MahjongSite.git`.
+clone https://github.com/BlaiseRideout/MahjongSite.git`.
 
 1. Ensure you have a Python 3 interpreter. You can get these from sites like:
     1. https://www.python.org/downloads/
@@ -98,7 +98,11 @@ and password that you use when accessing that server.
 this on some unused port on the machine. This should be a number
 between 1024 and 65535. A common one to use is 8888, but if this port
 is in use, you'll need to choose something else. Start the server with
-the command `/path/to/MahjongSite/main.py 8888`. If you don't get any
+the command `/path/to/MahjongSite/main.py 8888`. 
+You may get a question about a schema change, especially if this is the
+very first time you've run the server and created its database. Answer
+yes to make the changes.
+If you don't get any
 error messages, then the web site should be up and running. If you get
 errors like:
 
@@ -170,5 +174,5 @@ the node package manager, `npm`, to install js-beautify.
 History
 ==========
 
-This web site was originally developed by Blaise Ritchie for the
+This web site was originally developed by Blaise Rideout for the
 Seattle Riichi Mahjong Club. John Canning made contributions.
