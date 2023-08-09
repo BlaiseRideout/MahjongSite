@@ -4,6 +4,11 @@
 
 {% block content %}
 	<h1 id="page-title">Edit Quarter Settings</h1>
+	{% try %}
+	   <p>
+	     {% if guidance %}{{ guidance }}{% end %}
+           </p>
+        {% except %}{% end %}
 
 	{% for qtr in quarters %}
 	<form action="/admin/editquarter/{{ qtr['Quarter'] }}" method="post">
@@ -13,7 +18,10 @@
 		    <tr><td>Drop Game Count</td>
 		      <td><input type="number" value="{{ qtr['GameCount'] }}" 
 				 name="gameCount" required 
-				 min="1" step="1"/></td>
+				 min="1" step="1"
+				 {% try %} max="{{ maxdropgames }}"
+				 {% except %}{% end %}
+				 /></td>
 		    </tr>
 		    <tr><td>Qualifying Games</td>
 		      <td><input type="number" value="{{ qtr['QualifyingGames'] }}" 

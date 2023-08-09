@@ -208,6 +208,9 @@ class EditQuarterHandler(handler.BaseHandler):
                     # Use most recent quarter before selected one as default
                     rows = [(q,) + rows[0][1:]] + rows
             self.render("editquarter.html",
+                        maxdropgames = settings.MAXDROPGAMES,
+                        guidance = "Maximum number of dropped games allowed is {}".format(
+                            settings.MAXDROPGAMES) if len(rows) > 0 else "",
                         quarters=[dict(zip(quarterFields, row)) for row in rows],
                         help=helptext)
 
